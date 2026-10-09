@@ -16,7 +16,7 @@ if (PROD && !process.env.JWT_SECRET) console.warn('⚠ Chưa đặt JWT_SECRET t
 async function openDb() {
   if (process.env.MONGODB_URI) {
     const { MongoClient } = require('mongodb');
-    const cli = new MongoClient(process.env.MONGODB_URI);
+    const cli = new MongoClient(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 10000 });
     await cli.connect();
     const d = cli.db(process.env.MONGODB_DB || 'naruto');
     const U = d.collection('users'), S = d.collection('saves');
@@ -55,8 +55,13 @@ const cleanSave = d => {
 };
 
 (async () => {
-  const db = await openDb();
   const app = express();
+  const server = http.createServer(app);
+  // Mở cổng NGAY để Render nhận ra dịch vụ, rồi mới kết nối database
+  server.listen(PORT, '0.0.0.0', () => console.log('Server chạy cổng ' + PORT));
+  let db = null;
+  openDb().then(d => { db = d; console.log('✔ Database sẵn sàng'); })
+    .catch(e => { console.error('❌ Lỗi database:', e.message); process.exit(1); });
   app.set('trust proxy', 1);
   if (CROSS) app.use(cors({ origin: ORIGINS, credentials: true }));
   app.use(express.json({ limit: '50kb' }));
@@ -116,7 +121,6 @@ const cleanSave = d => {
   // Phục vụ chính file game (public/index.html) -> cùng domain, không lo CORS/cookie
   app.use(express.static(path.join(__dirname, 'public')));
 
-  const server = http.createServer(app);
   const io = new Server(server, { cors: CROSS ? { origin: ORIGINS, credentials: true } : undefined });
   io.use((s, next) => {
     try { s.data.user = jwt.verify(cookie.parse(s.handshake.headers.cookie || '').tk, SECRET).u; }
@@ -125,5 +129,4 @@ const cleanSave = d => {
   });
   require('./multiplayer')(io, { max: 60 });
 
-  server.listen(PORT, '0.0.0.0', () => console.log('Server chạy cổng ' + PORT));
 })();
